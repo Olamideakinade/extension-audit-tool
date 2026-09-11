@@ -10,44 +10,47 @@
     <header class="app-header">
         <div class="brand">
             <h1>extension-audit-tool</h1>
-            <span class="badge">v1.0.0-beta</span>
+            <span class="badge">v1.1.0</span>
         </div>
         <p class="subtitle">Read-only security posture analysis for local MCP servers, extensions, and plugins.</p>
     </header>
 
     <main class="dashboard">
-        <section class="control-panel">
-            <div class="action-group">
-                <button id="load-sample-btn" class="btn secondary">Load Sample Manifest</button>
-                <button id="run-audit-btn" class="btn primary">Run Audit Scan</button>
-                <button id="clear-btn" class="btn ghost">Clear Data</button>
+        <section class="metrics-grid">
+            <div class="metric-card high">
+                <span class="metric-title">High Risk Issues</span>
+                <span class="metric-value" id="countHigh">0</span>
             </div>
-            <div class="input-container">
-                <label for="manifest-input">Paste Configuration / Manifest Payload (JSON):</label>
-                <textarea id="manifest-input" placeholder="Paste ~/.codeium/mcp.json or VS Code extension dump here..."></textarea>
+            <div class="metric-card med">
+                <span class="metric-title">Medium Risk Issues</span>
+                <span class="metric-value" id="countMed">0</span>
+            </div>
+            <div class="metric-card low">
+                <span class="metric-title">Low Risk / Verified</span>
+                <span class="metric-value" id="countLow">0</span>
             </div>
         </section>
 
-        <section class="results-section">
-            <div class="results-header">
-                <h2>Audit Findings</h2>
-                <div id="summary-counters" class="counters">
-                    <span class="counter high">High: <strong>0</strong></span>
-                    <span class="counter medium">Medium: <strong>0</strong></span>
-                    <span class="counter low">Low: <strong>0</strong></span>
-                </div>
+        <section class="controls">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search audit items...">
             </div>
-            <div id="findings-container" class="findings-container">
-                <div class="empty-state">
-                    <p>No audit results yet. Load sample data or provide a configuration manifest to begin scanning.</p>
-                </div>
+            <div class="filters">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="high">High</button>
+                <button class="filter-btn" data-filter="medium">Medium</button>
+                <button class="filter-btn" data-filter="low">Low</button>
             </div>
+            <div class="actions">
+                <button id="exportJson">Export JSON</button>
+                <button id="exportCsv">Export CSV</button>
+            </div>
+        </section>
+
+        <section id="auditResults" class="results-container">
+            <!-- Dynamic audit cards rendered here -->
         </section>
     </main>
-
-    <footer class="app-footer">
-        <p>Client-side static analysis engine. No data leaves your local machine.</p>
-    </footer>
 
     <script src="app.js"></script>
 </body>

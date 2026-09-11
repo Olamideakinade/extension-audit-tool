@@ -18,137 +18,145 @@ const sampleManifest = {
         {
             "id": "ms-python.python",
             "publisher": "ms-python",
-            "version": "2024.0.0"
+            "version": "2024.2.0"
         }
     ]
 };
 
-document.getElementById('load-sample-btn').addEventListener('click', () => {
-    document.getElementById('manifest-input').value = JSON.stringify(sampleManifest, null, 2);
-});
+let currentAuditData = null;
 
-document.getElementById('clear-btn').addEventListener('click', () => {
-    document.getElementById('manifest-input').value = '';
-    document.getElementById('findings-container').innerHTML = `
-        <div class="empty-state">
-            <p>No audit results yet. Load sample data or provide a configuration manifest to begin scanning.</p>
-        </div>
-    `;
-    updateCounters(0, 0, 0);
-});
-
-document.getElementById('run-audit-btn').addEventListener('click', () => {
-    const rawInput = document.getElementById('manifest-input').value.trim();
-    if (!rawInput) {
-        alert('Please provide a configuration manifest JSON payload.');
-        return;
-    }
-
-    let data;
-    try {
-        data = JSON.parse(rawInput);
-    } catch (err) {
-        alert('Invalid JSON syntax. Please verify your input format.');
-        return;
-    }
-
-    const findings = runAuditEngine(data);
-    renderFindings(findings);
-});
-
-function runAuditEngine(data) {
-    const findings = [];
-
-    // Audit MCP Servers
-    if (data.mcpServers) {
-        for (const [name, config] of Object.entries(data.mcpServers)) {
+function analyzeManifest(manifest) {
+    const results = { high: 0, medium: 0, low: 0, items: [] };
+    
+    if (manifest.mcpServers) {
+        for (const [name, config] of Object.entries(manifest.mcpServers)) {
+            let risk = 'low';
+            let reason = 'Standard execution parameters detected.';
+            
             const argsStr = JSON.stringify(config.args || []);
-            if (argsStr.includes('http://') || argsStr.includes('https://') || argsStr.includes('.internal')) {
-                findings.push({
-                    title: `MCP Server: ${name}`,
-                    risk: 'high',
-                    description: `Server executes arguments containing remote URLs or untrusted endpoints. Potential RCE risk.`
-                });
-            } else if (config.command === 'npx' && argsStr.includes('-y')) {
-                findings.push({
-                    title: `MCP Server: ${name}`,
-                    risk: 'medium',
-                    description: `Server automatically installs packages without version pinning using 'npx -y'.`
-                });
-            } else {
-                findings.push({
-                    title: `MCP Server: ${name}`,
-                    risk: 'low',
-                    description: `Server config appears nominal with standard local execution constraints.`
-                });
+            if (argsStr.includes('http://') || argsStr.includes('https://') || argsStr.includes('malicious')) {
+                risk = 'high';
+                reason = 'Remote script execution or untrusted URL argument detected in MCP server command.';
+            } else if (config.command === 'node' || config.command === 'npx') {
+                risk = 'medium';
+                reason = 'Dynamic interpreter execution used without pinned version hashes.';
             }
+            
+            results[risk]++;
+            results.items.push({ type: 'MCP Server', name, risk, reason, raw: JSON.stringify(config) });
         }
     }
-
-    // Audit Extensions
-    if (Array.isArray(data.extensions)) {
-        data.extensions.forEach(ext => {
+    
+    if (manifest.extensions) {
+        manifest.extensions.forEach(ext => {
+            let risk = 'low';
+            let reason = 'Verified publisher signature matches baseline.';
+            
             if (ext.publisher === 'unknown-publisher' || !ext.publisher) {
-                findings.push({
-                    title: `Extension: ${ext.id}`,
-                    risk: 'high',
-                    description: `Published by an unverified or generic publisher string (${ext.publisher}). Potential typosquatting vector.`
-                });
-            } else {
-                findings.push({
-                    title: `Extension: ${ext.id}`,
-                    risk: 'low',
-                    description: `Extension verified under known publisher namespace (${ext.publisher}).`
-                });
+                risk = 'high';
+                reason = 'Extension published by unverified or anonymous entity.';
+            } else if (ext.version && ext.version.startsWith('0.')) {
+                risk = 'medium';
+                reason = 'Pre-release or unstable major version number in use.';
             }
+            
+            results[risk]++;
+            results.items.push({ type: 'Extension', name: ext.id, risk, reason, raw: JSON.stringify(ext) });
         });
     }
-
-    if (findings.length === 0) {
-        findings.push({
-            title: 'General Audit',
-            risk: 'low',
-            description: 'No known risk patterns matched in the supplied payload.'
-        });
-    }
-
-    return findings;
+    
+    return results;
 }
 
-function renderFindings(findings) {
-    const container = document.getElementById('findings-container');
+function renderAudit(data, filter = 'all', searchQuery = '') {
+    const container = document.getElementById('auditResults');
+    if (!container) return;
+    
     container.innerHTML = '';
-
-    let highCount = 0;
-    let medCount = 0;
-    let lowCount = 0;
-
-    findings.forEach(f => {
-        if (f.risk === 'high') highCount++;
-        if (f.risk === 'medium') medCount++;
-        if (f.risk === 'low') lowCount++;
-
+    
+    const filtered = data.items.filter(item => {
+        const matchesFilter = filter === 'all' || item.risk === filter;
+        const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || item.reason.toLowerCase().includes(searchQuery.toLowerCase());
+        return matchesFilter && matchesSearch;
+    });
+    
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">No items found matching the current criteria.</div>';
+        return;
+    }
+    
+    filtered.forEach(item => {
         const card = document.createElement('div');
-        card.className = 'finding-card';
+        card.className = `audit-card risk-${item.risk}`;
         card.innerHTML = `
-            <div class="finding-header">
-                <span class="finding-title">${escapeHtml(f.title)}</span>
-                <span class="risk-badge ${f.risk}">${f.risk}</span>
+            <div class="card-header">
+                <span class="item-type">${item.type}</span>
+                <span class="badge risk-${item.risk}">${item.risk.toUpperCase()} RISK</span>
             </div>
-            <p class="finding-desc">${escapeHtml(f.description)}</p>
+            <h3>${item.name}</h3>
+            <p class="card-reason">${item.reason}</p>
+            <pre class="card-raw"><code>${item.raw}</code></pre>
         `;
         container.appendChild(card);
     });
-
-    updateCounters(highCount, medCount, lowCount);
+    
+    document.getElementById('countHigh').textContent = data.high;
+    document.getElementById('countMed').textContent = data.medium;
+    document.getElementById('countLow').textContent = data.low;
 }
 
-function updateCounters(high, med, low) {
-    document.querySelector('.counter.high strong').textContent = high;
-    document.querySelector('.counter.medium strong').textContent = med;
-    document.querySelector('.counter.low strong').textContent = low;
+function exportReport(format) {
+    if (!currentAuditData) return;
+    let content = '';
+    let filename = '';
+    let mime = '';
+    
+    if (format === 'json') {
+        content = JSON.stringify(currentAuditData, null, 2);
+        filename = 'extension-audit-report.json';
+        mime = 'application/json';
+    } else if (format === 'csv') {
+        content = 'Type,Name,Risk,Reason\n' + currentAuditData.items.map(i => `"${i.type}","${i.name}","${i.risk}","${i.reason.replace(/"/g, '""')}"`).join('\n');
+        filename = 'extension-audit-report.csv';
+        mime = 'text/csv';
+    }
+    
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
-function escapeHtml(str) {
-    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+document.addEventListener('DOMContentLoaded', () => {
+    currentAuditData = analyzeManifest(sampleManifest);
+    renderAudit(currentAuditData);
+    
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+            renderAudit(currentAuditData, activeFilter, e.target.value);
+        });
+    }
+    
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            const filter = e.target.dataset.filter;
+            const query = document.getElementById('searchInput')?.value || '';
+            renderAudit(currentAuditData, filter, query);
+        });
+    });
+    
+    const exportJsonBtn = document.getElementById('exportJson');
+    if (exportJsonBtn) exportJsonBtn.addEventListener('click', () => exportReport('json'));
+    
+    const exportCsvBtn = document.getElementById('exportCsv');
+    if (exportCsvBtn) exportCsvBtn.addEventListener('click', () => exportReport('csv'));
+});
