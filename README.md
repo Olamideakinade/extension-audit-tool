@@ -6,15 +6,25 @@
 
 ![Project Snapshot](preview.svg)
 
-> 🚀 **v1.1.0 Release:** Advanced security posture analysis, live filtering, and report exports for local MCP servers, extensions, and plugins.
+> 🚀 **v1.2.0 Release:** Executive compliance scoring, advanced vulnerability analytics, structured report export, and robust error boundaries.
 
 ## Features
 
-- **Deep Manifest Inspection**: Analyze `mcpServers` and extension configurations for supply chain vulnerabilities.
-- **Risk Scoring**: Automated high, medium, and low risk detection based on execution parameters and publisher verification.
-- **Report Export**: Export audit results in JSON or CSV format for compliance tracking.
-- **Real-Time Filtering**: Instant search and severity classification filters.
+- **Deep Supply Chain Inspection:** Audit local Model Context Protocol (MCP) servers, browser/IDE extensions, and plugin dependencies.
+- **Risk Scoring & Posture Analysis:** Automated heuristic engine classifying vectors as High, Medium, or Low risk.
+- **Executive Compliance Reporting:** Instant scorecard evaluating dependencies against modern security benchmarks.
+- **Flexible Export:** Export structured results as JSON, CSV, or formatted HTML audit summaries.
 
-## Getting Started
+## Quick Start
 
-Clone the repository and open `index.html` in any modern web browser or serve via static file server.
+Clone the repository and open `index.html` in any modern browser or host via static web server:
+
+```bash
+git clone https://github.com/Olamideakinade/extension-audit-tool.git
+cd extension-audit-tool
+open index.html
+```
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.

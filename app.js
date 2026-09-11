@@ -1,3 +1,8 @@
+/**
+ * Extension & MCP Supply Chain Auditor - Core Application Logic
+ * Version: v1.2.0
+ */
+
 const sampleManifest = {
     "mcpServers": {
         "filesystem": {
@@ -7,6 +12,10 @@ const sampleManifest = {
         "untrusted-remote": {
             "command": "node",
             "args": ["https://malicious-registry.internal/exec.js"]
+        },
+        "database-query": {
+            "command": "python3",
+            "args": ["-m", "mcp_sql_server", "--dsn", "postgres://admin:secret@localhost:5432/prod"]
         }
     },
     "extensions": [
@@ -19,111 +28,239 @@ const sampleManifest = {
             "id": "ms-python.python",
             "publisher": "ms-python",
             "version": "2024.2.0"
+        },
+        {
+            "id": "risk.evaluator.plugin",
+            "publisher": "community",
+            "version": "0.1.9"
         }
     ]
 };
 
-let currentAuditData = null;
+class AuditEngine {
+    constructor(manifest) {
+        this.manifest = manifest;
+        this.results = [];
+        this.complianceScore = 100;
+    }
 
-function analyzeManifest(manifest) {
-    const results = { high: 0, medium: 0, low: 0, items: [] };
-    
-    if (manifest.mcpServers) {
-        for (const [name, config] of Object.entries(manifest.mcpServers)) {
-            let risk = 'low';
-            let reason = 'Standard execution parameters detected.';
-            
+    evaluate() {
+        this.results = [];
+        let deductions = 0;
+
+        const mcpServers = this.manifest.mcpServers || {};
+        for (const [name, config] of Object.entries(mcpServers)) {
+            let risk = "LOW";
+            let reasons = [];
+
             const argsStr = JSON.stringify(config.args || []);
-            if (argsStr.includes('http://') || argsStr.includes('https://') || argsStr.includes('malicious')) {
-                risk = 'high';
-                reason = 'Remote script execution or untrusted URL argument detected in MCP server command.';
-            } else if (config.command === 'node' || config.command === 'npx') {
-                risk = 'medium';
-                reason = 'Dynamic interpreter execution used without pinned version hashes.';
+            if (argsStr.includes("http://") || argsStr.includes("https://") || argsStr.includes("malicious")) {
+                risk = "HIGH";
+                reasons.push("Remote or external execution URL detected in command arguments.");
+                deductions += 25;
+            } else if (argsStr.includes("password") || argsStr.includes("secret") || argsStr.includes("dsn")) {
+                risk = "MEDIUM";
+                reasons.push("Potential credentials or connection strings exposed in arguments.");
+                deductions += 15;
+            } else {
+                reasons.push("Standard local execution path.");
             }
-            
-            results[risk]++;
-            results.items.push({ type: 'MCP Server', name, risk, reason, raw: JSON.stringify(config) });
+
+            this.results.push({
+                type: "MCP Server",
+                name,
+                publisher: config.command || "unknown",
+                risk,
+                reasons: reasons.join(" ")
+            });
         }
-    }
-    
-    if (manifest.extensions) {
-        manifest.extensions.forEach(ext => {
-            let risk = 'low';
-            let reason = 'Verified publisher signature matches baseline.';
-            
-            if (ext.publisher === 'unknown-publisher' || !ext.publisher) {
-                risk = 'high';
-                reason = 'Extension published by unverified or anonymous entity.';
-            } else if (ext.version && ext.version.startsWith('0.')) {
-                risk = 'medium';
-                reason = 'Pre-release or unstable major version number in use.';
+
+        const extensions = this.manifest.extensions || [];
+        extensions.forEach(ext => {
+            let risk = "LOW";
+            let reasons = [];
+
+            if (ext.publisher === "unknown-publisher" || !ext.publisher) {
+                risk = "HIGH";
+                reasons.push("Unverified publisher identity.");
+                deductions += 20;
+            } else if (ext.version && ext.version.startsWith("0.")) {
+                risk = "MEDIUM";
+                reasons.push("Pre-release or experimental version numbering.");
+                deductions += 10;
+            } else {
+                reasons.push("Verified publisher and stable release.");
             }
-            
-            results[risk]++;
-            results.items.push({ type: 'Extension', name: ext.id, risk, reason, raw: JSON.stringify(ext) });
+
+            this.results.push({
+                type: "Extension",
+                name: ext.id,
+                publisher: ext.publisher,
+                risk,
+                reasons: reasons.join(" ")
+            });
         });
+
+        this.complianceScore = Math.max(0, 100 - deductions);
+        return this.results;
     }
-    
-    return results;
+
+    getSummary() {
+        const counts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+        this.results.forEach(r => {
+            if (counts[r.risk] !== undefined) counts[r.risk]++;
+        });
+        return {
+            total: this.results.length,
+            counts,
+            complianceScore: this.complianceScore
+        };
+    }
 }
 
-function renderAudit(data, filter = 'all', searchQuery = '') {
-    const container = document.getElementById('auditResults');
-    if (!container) return;
+let currentManifest = sampleManifest;
+let currentFilter = "ALL";
+let currentSearch = "";
+
+function initApp() {
+    const editor = document.getElementById("json-editor");
+    if (editor) {
+        editor.value = JSON.stringify(sampleManifest, null, 2);
+    }
+
+    runAudit();
+    setupEventListeners();
+}
+
+function runAudit() {
+    const editor = document.getElementById("json-editor");
+    try {
+        const parsed = JSON.parse(editor.value);
+        currentManifest = parsed;
+        const engine = new AuditEngine(currentManifest);
+        engine.evaluate();
+        renderDashboard(engine);
+        clearError();
+    } catch (err) {
+        showError("Invalid JSON manifest format: " + err.message);
+    }
+}
+
+function renderDashboard(engine) {
+    const summary = engine.getSummary();
     
-    container.innerHTML = '';
-    
-    const filtered = data.items.filter(item => {
-        const matchesFilter = filter === 'all' || item.risk === filter;
-        const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || item.reason.toLowerCase().includes(searchQuery.toLowerCase());
+    document.getElementById("stat-total").textContent = summary.total;
+    document.getElementById("stat-high").textContent = summary.counts.HIGH;
+    document.getElementById("stat-med").textContent = summary.counts.MEDIUM;
+    document.getElementById("stat-low").textContent = summary.counts.LOW;
+    document.getElementById("stat-compliance").textContent = summary.complianceScore + "%";
+
+    const tbody = document.getElementById("audit-results-body");
+    tbody.innerHTML = "";
+
+    const filtered = engine.results.filter(item => {
+        const matchesFilter = currentFilter === "ALL" || item.risk === currentFilter;
+        const matchesSearch = item.name.toLowerCase().includes(currentSearch.toLowerCase()) ||
+                              item.publisher.toLowerCase().includes(currentSearch.toLowerCase());
         return matchesFilter && matchesSearch;
     });
-    
+
     if (filtered.length === 0) {
-        container.innerHTML = '<div class="empty-state">No items found matching the current criteria.</div>';
+        tbody.innerHTML = `<tr><td colspan="5" class="no-results">No matching audit findings found.</td></tr>`;
         return;
     }
-    
+
     filtered.forEach(item => {
-        const card = document.createElement('div');
-        card.className = `audit-card risk-${item.risk}`;
-        card.innerHTML = `
-            <div class="card-header">
-                <span class="item-type">${item.type}</span>
-                <span class="badge risk-${item.risk}">${item.risk.toUpperCase()} RISK</span>
-            </div>
-            <h3>${item.name}</h3>
-            <p class="card-reason">${item.reason}</p>
-            <pre class="card-raw"><code>${item.raw}</code></pre>
+        const tr = document.createElement("tr");
+        const badgeClass = `badge-${item.risk.toLowerCase()}`;
+        tr.innerHTML = `
+            <td><span class="type-tag">${item.type}</span></td>
+            <td><code>${item.name}</code></td>
+            <td>${item.publisher}</td>
+            <td><span class="risk-badge ${badgeClass}">${item.risk}</span></td>
+            <td class="reason-text">${item.reasons}</td>
         `;
-        container.appendChild(card);
+        tbody.appendChild(tr);
     });
-    
-    document.getElementById('countHigh').textContent = data.high;
-    document.getElementById('countMed').textContent = data.medium;
-    document.getElementById('countLow').textContent = data.low;
 }
 
-function exportReport(format) {
-    if (!currentAuditData) return;
-    let content = '';
-    let filename = '';
-    let mime = '';
-    
-    if (format === 'json') {
-        content = JSON.stringify(currentAuditData, null, 2);
-        filename = 'extension-audit-report.json';
-        mime = 'application/json';
-    } else if (format === 'csv') {
-        content = 'Type,Name,Risk,Reason\n' + currentAuditData.items.map(i => `"${i.type}","${i.name}","${i.risk}","${i.reason.replace(/"/g, '""')}"`).join('\n');
-        filename = 'extension-audit-report.csv';
-        mime = 'text/csv';
+function showError(msg) {
+    let banner = document.getElementById("error-banner");
+    if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "error-banner";
+        banner.className = "error-banner";
+        document.querySelector(".dashboard").prepend(banner);
     }
-    
-    const blob = new Blob([content], { type: mime });
+    banner.textContent = msg;
+}
+
+function clearError() {
+    const banner = document.getElementById("error-banner");
+    if (banner) banner.remove();
+}
+
+function setupEventListeners() {
+    document.getElementById("run-audit-btn").addEventListener("click", runAudit);
+    document.getElementById("load-sample-btn").addEventListener("click", () => {
+        document.getElementById("json-editor").value = JSON.stringify(sampleManifest, null, 2);
+        runAudit();
+    });
+
+    document.getElementById("search-input").addEventListener("input", (e) => {
+        currentSearch = e.target.value;
+        runAudit();
+    });
+
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+            e.target.classList.add("active");
+            currentFilter = e.target.getAttribute("data-filter");
+            runAudit();
+        });
+    });
+
+    document.getElementById("export-json-btn").addEventListener("click", () => {
+        exportFile("application/json", JSON.stringify(currentManifest, null, 2), "audit-manifest.json");
+    });
+
+    document.getElementById("export-csv-btn").addEventListener("click", () => {
+        const engine = new AuditEngine(currentManifest);
+        engine.evaluate();
+        let csv = "Type,Name,Publisher,Risk,Reasons\n";
+        engine.results.forEach(r => {
+            csv += `"${r.type}","${r.name}","${r.publisher}","${r.risk}","${r.reasons}"\n`;
+        });
+        exportFile("text/csv", csv, "audit-report.csv");
+    });
+
+    document.getElementById("export-html-btn").addEventListener("click", () => {
+        const engine = new AuditEngine(currentManifest);
+        engine.evaluate();
+        const summary = engine.getSummary();
+        let html = `<!DOCTYPE html><html><head><title>Audit Report</title><style>body{font-family:sans-serif;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ccc;padding:8px;text-align:left;}</style></head><body>`;
+        html += `<h1>Supply Chain Audit Report</h1><p>Compliance Score: ${summary.complianceScore}%</p>`;
+        html += `<table><tr><th>Type</th><th>Name</th><th>Publisher</th><th>Risk</th><th>Reasons</th></tr>`;
+        engine.results.forEach(r => {
+            html += `<tr><td>${r.type}</td><td>${r.name}</td><td>${r.publisher}</td><td>${r.risk}</td><td>${r.reasons}</td></tr>`;
+        });
+        html += `</table></body></html>`;
+        exportFile("text/html", html, "audit-report.html");
+    });
+
+    window.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            runAudit();
+        }
+    });
+}
+
+function exportFile(mimeType, content, filename) {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
@@ -132,31 +269,4 @@ function exportReport(format) {
     URL.revokeObjectURL(url);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    currentAuditData = analyzeManifest(sampleManifest);
-    renderAudit(currentAuditData);
-    
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
-            const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-            renderAudit(currentAuditData, activeFilter, e.target.value);
-        });
-    }
-    
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            e.target.classList.add('active');
-            const filter = e.target.dataset.filter;
-            const query = document.getElementById('searchInput')?.value || '';
-            renderAudit(currentAuditData, filter, query);
-        });
-    });
-    
-    const exportJsonBtn = document.getElementById('exportJson');
-    if (exportJsonBtn) exportJsonBtn.addEventListener('click', () => exportReport('json'));
-    
-    const exportCsvBtn = document.getElementById('exportCsv');
-    if (exportCsvBtn) exportCsvBtn.addEventListener('click', () => exportReport('csv'));
-});
+document.addEventListener("DOMContentLoaded", initApp);
