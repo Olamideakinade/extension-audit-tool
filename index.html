@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extension & MCP Supply Chain Auditor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <h1>extension-audit-tool</h1>
+            <span class="badge">v1.0.0-beta</span>
+        </div>
+        <p class="subtitle">Read-only security posture analysis for local MCP servers, extensions, and plugins.</p>
+    </header>
+
+    <main class="dashboard">
+        <section class="control-panel">
+            <div class="action-group">
+                <button id="load-sample-btn" class="btn secondary">Load Sample Manifest</button>
+                <button id="run-audit-btn" class="btn primary">Run Audit Scan</button>
+                <button id="clear-btn" class="btn ghost">Clear Data</button>
+            </div>
+            <div class="input-container">
+                <label for="manifest-input">Paste Configuration / Manifest Payload (JSON):</label>
+                <textarea id="manifest-input" placeholder="Paste ~/.codeium/mcp.json or VS Code extension dump here..."></textarea>
+            </div>
+        </section>
+
+        <section class="results-section">
+            <div class="results-header">
+                <h2>Audit Findings</h2>
+                <div id="summary-counters" class="counters">
+                    <span class="counter high">High: <strong>0</strong></span>
+                    <span class="counter medium">Medium: <strong>0</strong></span>
+                    <span class="counter low">Low: <strong>0</strong></span>
+                </div>
+            </div>
+            <div id="findings-container" class="findings-container">
+                <div class="empty-state">
+                    <p>No audit results yet. Load sample data or provide a configuration manifest to begin scanning.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <p>Client-side static analysis engine. No data leaves your local machine.</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
